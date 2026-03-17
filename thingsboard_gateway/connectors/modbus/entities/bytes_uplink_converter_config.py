@@ -23,9 +23,14 @@ class BytesUplinkConverterConfig:
         self.byte_order = Endian.BIG if kwargs.get('byteOrder', 'LITTLE').upper() == "BIG" else Endian.LITTLE
         self.word_order = Endian.BIG if kwargs.get('wordOrder', 'LITTLE').upper() == "BIG" else Endian.LITTLE
         
-        # String null terminator handling
-        # When True, strips null bytes (0x00) from end of strings
-        # Useful for PLCs like CODESYS that use null-terminated C-style strings
+        # String null terminator handling for CODESYS-style C-strings
+        # When True, truncate string at first null byte (0x00)
+        # PLCs like CODESYS don't clear the remainder of string buffers,
+        # so old data may appear after the null terminator
+        # Example: String(15) containing "DC01" may have bytes like:
+        #   44 43 30 31 00 36 37 38 00 39 00 00 00 00 00
+        #   D  C  0  1  ␀ garbage...    more nulls
+        # Setting this to True will truncate at the first ␀
         # Default: False for backwards compatibility
         self.string_null_terminate = kwargs.get('stringNullTerminate', False)
         

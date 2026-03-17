@@ -2,24 +2,38 @@
 
 ## Problem
 
-PLCs like CODESYS use C-style null-terminated strings. When a string value changes from a longer value to a shorter one, the remaining bytes contain null characters (0x00).
+PLCs like CODESYS use C-style null-terminated strings with fixed buffer sizes. When a string value changes from longer to shorter, the PLC doesn't clear the remaining buffer bytes.
 
-Example:
-- PLC string variable allocated as 10 characters
-- Initially set to "DC12345" (7 chars + 3 nulls)
-- Updated to "DC01" (4 chars + 6 nulls)
-- ThingsBoard reads: "DC01\x00\x00\x00\x00\x00\x00"
-- Decoded as: "DC01000000" or displays incorrectly
+**Example:**
+- CODESYS String(15) initially contains "DC12345" (7 chars + 8 nulls)
+- Updated to "DC01" (4 chars + 11 nulls)
+- BUT the old data remains after the null: "DC01\x00garbage..."
 
-## Solution
+**Actual bytes from your TM241:**
+```
+Raw: 43 44 31 30 36 00 38 37 00 39 00 00 00 00 00
+      D  C  0  1  6  ␀  8  7  ␀  9  ␀  ␀  ␀  ␀  ␀
+                 ^first null
+```
 
-### New Config Option: `stringNullTerminate`
+After byte swap (LITTLE): "DC01\x00garbage689\x00..." 
 
-When set to `true`, trailing null bytes (0x00) are stripped from strings.
+My original fix using `rstrip(b'\x00')` would give:
+- **WRONG**: "DC01\x00garbage689" (still contains garbage!)
 
-**Default: `false`** (for backwards compatibility)
+## Fixed Implementation
 
-### Configuration
+**Stop at FIRST null byte (C-style string termination):**
+```python
+null_pos = decoded.find(b'\x00')
+if null_pos != -1:
+    decoded = decoded[:null_pos]
+```
+
+Result:
+- **CORRECT**: "DC01" (stops at first null)
+
+## Configuration
 
 ```json
 {
@@ -29,53 +43,23 @@ When set to `true`, trailing null bytes (0x00) are stripped from strings.
 }
 ```
 
-### Example
+## Test Results
 
-| Register Values | `stringNullTerminate: false` | `stringNullTerminate: true` |
-|-----------------|------------------------------|----------------------------|
-| `0x44 0x43 0x01 0x00 0x00 0x00` | "DC01\x00\x00" | "DC01" |
-| "DC123" → "DC01" | "DC010000" (wrong) | "DC01" (correct) |
-
-## How It Works
-
-The fix adds null byte stripping after decoding:
-
-```python
-if string_null_terminate:
-    decoded = decoded.rstrip(b'\x00')
 ```
+Raw bytes: 44 43 30 31 00 36 37 38 00 39 00 00 00 00 00
 
-This only affects the `string` and `bytes` data types.
+WITHOUT FIX (stringNullTerminate=false):
+  Result: "DC01\x00garbage..." WRONG
+
+WITH FIX (stringNullTerminate=true):
+  Result: "DC01" CORRECT
+```
 
 ## Backwards Compatibility
 
-| Config | Behavior |
-|--------|----------|
-| Not set | No null stripping (original behavior) |
-| `stringNullTerminate: false` | No null stripping |
-| `stringNullTerminate: true` | Strips trailing nulls |
+| Setting | Behavior |
+|---------|----------|
+| Not set / false | Original behavior - reads entire buffer |
+| true | Truncates at first null byte |
 
-**No breaking changes** - existing configs work exactly as before.
-
-## Files Modified
-
-| File | Change |
-|------|--------|
-| `bytes_uplink_converter_config.py` | Added `string_null_terminate` config (default: False) |
-| `bytes_modbus_uplink_converter.py` | Added null stripping for string/bytes types |
-
-## Testing
-
-Test with your CODESYS PLC:
-
-```json
-{
-  "byteOrder": "BIG",
-  "wordOrder": "BIG",
-  "stringNullTerminate": true
-}
-```
-
-Read a string that was shortened from "DC123" to "DC01":
-- Without fix: Displays as "DC01" with garbage or wrong characters
-- With fix: Displays correctly as "DC01"
+**No breaking changes** - default is false for existing configs.

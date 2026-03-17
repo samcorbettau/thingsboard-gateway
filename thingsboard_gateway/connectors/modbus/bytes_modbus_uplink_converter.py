@@ -4,7 +4,7 @@
 #     you may not use this file except in compliance with the License.
 #     You may obtain a copy of the License at
 #
-#         http://www.apache.org/licenses/LICENSE-2.0
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
 #     Unless required by applicable law or agreed to in writing, software
 #     distributed under the License is distributed on an "AS IS" BASIS,
@@ -311,18 +311,28 @@ class BytesModbusUplinkConverter(ModbusConverter):
             result_data = decoded
         elif isinstance(decoded, bytes) and lower_type == "string":
             # Handle null-terminated strings from PLCs like CODESYS
-            # When stringNullTerminate=True, strip trailing null bytes (0x00)
+            # CODESYS String(n) types don't clear the buffer when values change,
+            # so old data remains after the null terminator
+            # Example: String(15) containing "DC01" might have:
+            #   bytes: 44 43 30 31 00 36 37 38 00 39 00 00 00 00 00
+            #          D  C  0  1  ␀  garbage...   more nulls
+            # With stringNullTerminate=True, we truncate at the FIRST null byte
+            # Result: just "DC01" (length 4), not "DC01\x00garbage..."
             if string_null_terminate:
-                decoded = decoded.rstrip(b'\x00')
+                null_pos = decoded.find(b'\x00')
+                if null_pos != -1:
+                    decoded = decoded[:null_pos]
             try:
                 result_data = decoded.decode('UTF-8')
             except UnicodeDecodeError as e:
                 self._log.error("Error decoding string from bytes, will be saved as hex: %s", decoded, exc_info=e)
                 result_data = decoded.hex()
         elif isinstance(decoded, bytes) and lower_type == "bytes":
-            # Handle null termination for raw bytes type as well
+            # Also handle null termination for raw bytes type
             if string_null_terminate:
-                decoded = decoded.rstrip(b'\x00')
+                null_pos = decoded.find(b'\x00')
+                if null_pos != -1:
+                    decoded = decoded[:null_pos]
             result_data = decoded.hex()
         elif isinstance(decoded, list):
             if configuration.get('bit') is not None:
