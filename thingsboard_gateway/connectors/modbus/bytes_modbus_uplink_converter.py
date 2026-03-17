@@ -332,11 +332,7 @@ class BytesModbusUplinkConverter(ModbusConverter):
                 self._log.error("Error decoding string from bytes, will be saved as hex: %s", decoded, exc_info=e)
                 result_data = decoded.hex()
         elif isinstance(decoded, bytes) and lower_type == "bytes":
-            # Also apply terminator for raw bytes type
-            if string_terminator is not None and isinstance(string_terminator, bytes):
-                terminator_pos = decoded.find(string_terminator)
-                if terminator_pos != -1:
-                    decoded = decoded[:terminator_pos]
+            # Do NOT apply terminator to raw bytes - this could break custom binary implementations
             result_data = decoded.hex()
         elif isinstance(decoded, list):
             if configuration.get('bit') is not None:
