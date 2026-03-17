@@ -135,6 +135,7 @@ class BytesModbusUplinkConverter(ModbusConverter):
             decoded_data = self.decode_data(chunk, config,
                                             self.__config.byte_order,
                                             self.__config.word_order,
+                                            self.__config.string_byte_order,
                                             self.__config.string_terminator)
 
             if decoded_data is None:
@@ -152,6 +153,7 @@ class BytesModbusUplinkConverter(ModbusConverter):
         decoded_data = self.decode_data(encoded_data, config,
                                         self.__config.byte_order,
                                         self.__config.word_order,
+                                        self.__config.string_byte_order,
                                         self.__config.string_terminator)
 
         if decoded_data is None:
@@ -203,7 +205,7 @@ class BytesModbusUplinkConverter(ModbusConverter):
 
         return key_name
 
-    def decode_data(self, encoded_data, config, endian_order, word_endian_order, string_terminator=None):
+    def decode_data(self, encoded_data, config, endian_order, word_endian_order, string_endian_order=None, string_terminator=None):
         decoded_data = None
 
         if config['functionCode'] in (1, 2):
@@ -214,11 +216,13 @@ class BytesModbusUplinkConverter(ModbusConverter):
                 decoder = self.from_coils(encoded_data, word_endian_order=word_endian_order)
 
             decoded_data = self.decode_from_registers(decoder, config,
+                                                      string_endian_order=string_endian_order,
                                                       string_terminator=string_terminator)
         elif config['functionCode'] in (3, 4):
             decoder = BinaryPayloadDecoder.fromRegisters(encoded_data, byteorder=endian_order,
                                                          wordorder=word_endian_order)
             decoded_data = self.decode_from_registers(decoder, config,
+                                                      string_endian_order=string_endian_order,
                                                       string_terminator=string_terminator)
 
             if config.get('divider'):
@@ -249,7 +253,7 @@ class BytesModbusUplinkConverter(ModbusConverter):
 
         return decoder
 
-    def decode_from_registers(self, decoder, configuration, string_terminator=None):
+    def decode_from_registers(self, decoder, configuration, string_endian_order=None, string_terminator=None):
         objects_count = configuration.get("objectsCount",
                                           configuration.get("registersCount", configuration.get("registerCount", 1)))
         lower_type = configuration["type"].lower()
@@ -282,6 +286,9 @@ class BytesModbusUplinkConverter(ModbusConverter):
 
         elif lower_type == "string":
             decoded = decoder_functions[lower_type](objects_count * 2)
+            # Apply string-specific byte order if provided
+            if string_endian_order is not None:
+                decoded = self._apply_string_byte_order(decoded, string_endian_order, decoder._wordorder)
 
         elif lower_type == "bytes":
             decoded = decoder_functions[lower_type](size=objects_count * 2)
@@ -352,6 +359,40 @@ class BytesModbusUplinkConverter(ModbusConverter):
             result_data = decoded
 
         return result_data
+
+    @staticmethod
+    def _apply_string_byte_order(raw_bytes: bytes, string_byte_order, word_order) -> bytes:
+        """Apply byte order transformation for strings.
+
+        Some PLC manufacturers (like Schneider) use different byte ordering for
+        strings than for numeric values. This function applies the appropriate
+        transformation based on the stringByteOrder configuration.
+
+        Args:
+            raw_bytes: Raw bytes decoded from registers
+            string_byte_order: Endian.BIG or Endian.LITTLE for string byte order
+            word_order: Endian.BIG or Endian.LITTLE for word order
+
+        Returns:
+            Bytes with appropriate byte order transformation applied
+        """
+        from array import array
+
+        if string_byte_order == Endian.LITTLE or word_order == Endian.LITTLE:
+            # Convert bytes to array of 16-bit unsigned integers (words)
+            handle = array("H", raw_bytes)
+
+            if string_byte_order == Endian.LITTLE:
+                # Swap bytes within each word
+                handle.byteswap()
+
+            if word_order == Endian.LITTLE:
+                # Reverse word order
+                handle.reverse()
+
+            return handle.tobytes()
+
+        return raw_bytes
 
     def _get_device_report_strategy(self, report_strategy, device_name):
         try:
