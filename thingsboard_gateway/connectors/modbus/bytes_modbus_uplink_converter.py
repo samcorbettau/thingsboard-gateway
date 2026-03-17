@@ -278,9 +278,13 @@ class BytesModbusUplinkConverter(ModbusConverter):
 
         elif lower_type == "string":
             decoded = decoder_functions[lower_type](objects_count * 2)
+            # FIX: Apply byte order transformation for strings (pymodbus decode_string ignores byte order)
+            decoded = self._apply_byte_order_for_string(decoded, decoder._byteorder, decoder._wordorder)
 
         elif lower_type == "bytes":
             decoded = decoder_functions[lower_type](size=objects_count * 2)
+            # FIX: Apply byte order transformation for raw bytes (same issue as strings)
+            decoded = self._apply_byte_order_for_string(decoded, decoder._byteorder, decoder._wordorder)
 
         elif decoder_functions.get(lower_type) is not None:
             decoded = decoder_functions[lower_type]()
@@ -331,6 +335,41 @@ class BytesModbusUplinkConverter(ModbusConverter):
             result_data = decoded
 
         return result_data
+
+
+    @staticmethod
+    def _apply_byte_order_for_string(raw_bytes: bytes, byte_order, word_order) -> bytes:
+        """Apply byte order transformation for strings/bytes.
+        
+        This mirrors what pymodbus's BinaryPayloadDecoder._unpack_words does for numeric types.
+        The pymodbus decode_string() method ignores byte_order/word_order parameters,
+        so strings and bytes were not being properly byte-swapped when byteOrder=LITTLE.
+        
+        Args:
+            raw_bytes: Raw bytes from the Modbus device
+            byte_order: Endian.BIG or Endian.LITTLE for byte order within each 16-bit word
+            word_order: Endian.BIG or Endian.LITTLE for word order (multi-word values)
+            
+        Returns:
+            Bytes with byte order transformation applied
+        """
+        from array import array
+        
+        if byte_order == Endian.LITTLE or word_order == Endian.LITTLE:
+            # Convert bytes to array of 16-bit unsigned integers (words)
+            handle = array("H", raw_bytes)
+            
+            if byte_order == Endian.LITTLE:
+                # Swap bytes within each word
+                handle.byteswap()
+            
+            if word_order == Endian.LITTLE:
+                # Reverse word order
+                handle.reverse()
+            
+            return handle.tobytes()
+        
+        return raw_bytes
 
     def _get_device_report_strategy(self, report_strategy, device_name):
         try:
