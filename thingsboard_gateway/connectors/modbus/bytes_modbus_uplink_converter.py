@@ -4,7 +4,7 @@
 #     you may not use this file except in compliance with the License.
 #     You may obtain a copy of the License at
 #
-#     http://www.apache.org/licenses/LICENSE-2.0
+#         http://www.apache.org/licenses/LICENSE-2.0
 #
 #     Unless required by applicable law or agreed to in writing, software
 #     distributed under the License is distributed on an "AS IS" BASIS,
@@ -135,7 +135,7 @@ class BytesModbusUplinkConverter(ModbusConverter):
             decoded_data = self.decode_data(chunk, config,
                                             self.__config.byte_order,
                                             self.__config.word_order,
-                                            self.__config.string_null_terminate)
+                                            self.__config.string_terminator)
 
             if decoded_data is None:
                 self._log.warning("Decoded data is empty, with config: %s", config)
@@ -152,7 +152,7 @@ class BytesModbusUplinkConverter(ModbusConverter):
         decoded_data = self.decode_data(encoded_data, config,
                                         self.__config.byte_order,
                                         self.__config.word_order,
-                                        self.__config.string_null_terminate)
+                                        self.__config.string_terminator)
 
         if decoded_data is None:
             self._log.warning("Decoded data is empty, with config: %s", config)
@@ -203,7 +203,7 @@ class BytesModbusUplinkConverter(ModbusConverter):
 
         return key_name
 
-    def decode_data(self, encoded_data, config, endian_order, word_endian_order, string_null_terminate=False):
+    def decode_data(self, encoded_data, config, endian_order, word_endian_order, string_terminator=None):
         decoded_data = None
 
         if config['functionCode'] in (1, 2):
@@ -214,12 +214,12 @@ class BytesModbusUplinkConverter(ModbusConverter):
                 decoder = self.from_coils(encoded_data, word_endian_order=word_endian_order)
 
             decoded_data = self.decode_from_registers(decoder, config,
-                                                      string_null_terminate=string_null_terminate)
+                                                      string_terminator=string_terminator)
         elif config['functionCode'] in (3, 4):
             decoder = BinaryPayloadDecoder.fromRegisters(encoded_data, byteorder=endian_order,
                                                          wordorder=word_endian_order)
             decoded_data = self.decode_from_registers(decoder, config,
-                                                      string_null_terminate=string_null_terminate)
+                                                      string_terminator=string_terminator)
 
             if config.get('divider'):
                 decoded_data = float(decoded_data) / float(config['divider'])
@@ -249,7 +249,7 @@ class BytesModbusUplinkConverter(ModbusConverter):
 
         return decoder
 
-    def decode_from_registers(self, decoder, configuration, string_null_terminate=False):
+    def decode_from_registers(self, decoder, configuration, string_terminator=None):
         objects_count = configuration.get("objectsCount",
                                           configuration.get("registersCount", configuration.get("registerCount", 1)))
         lower_type = configuration["type"].lower()
@@ -310,29 +310,33 @@ class BytesModbusUplinkConverter(ModbusConverter):
         if isinstance(decoded, int):
             result_data = decoded
         elif isinstance(decoded, bytes) and lower_type == "string":
-            # Handle null-terminated strings from PLCs like CODESYS
+            # Handle string terminator for PLCs like CODESYS
             # CODESYS String(n) types don't clear the buffer when values change,
-            # so old data remains after the null terminator
+            # so old data remains after the terminator byte
+            # 
             # Example: String(15) containing "DC01" might have:
             #   bytes: 44 43 30 31 00 36 37 38 00 39 00 00 00 00 00
             #          D  C  0  1  ␀  garbage...   more nulls
-            # With stringNullTerminate=True, we truncate at the FIRST null byte
+            # 
+            # With stringTerminator="0x00", we truncate at the FIRST terminator byte
             # Result: just "DC01" (length 4), not "DC01\x00garbage..."
-            if string_null_terminate:
-                null_pos = decoded.find(b'\x00')
-                if null_pos != -1:
-                    decoded = decoded[:null_pos]
+            #
+            # Default: None (no truncation, original behavior)
+            if string_terminator is not None and isinstance(string_terminator, bytes):
+                terminator_pos = decoded.find(string_terminator)
+                if terminator_pos != -1:
+                    decoded = decoded[:terminator_pos]
             try:
                 result_data = decoded.decode('UTF-8')
             except UnicodeDecodeError as e:
                 self._log.error("Error decoding string from bytes, will be saved as hex: %s", decoded, exc_info=e)
                 result_data = decoded.hex()
         elif isinstance(decoded, bytes) and lower_type == "bytes":
-            # Also handle null termination for raw bytes type
-            if string_null_terminate:
-                null_pos = decoded.find(b'\x00')
-                if null_pos != -1:
-                    decoded = decoded[:null_pos]
+            # Also apply terminator for raw bytes type
+            if string_terminator is not None and isinstance(string_terminator, bytes):
+                terminator_pos = decoded.find(string_terminator)
+                if terminator_pos != -1:
+                    decoded = decoded[:terminator_pos]
             result_data = decoded.hex()
         elif isinstance(decoded, list):
             if configuration.get('bit') is not None:
