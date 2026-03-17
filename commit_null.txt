@@ -1,0 +1,6 @@
+fix(modbus): add stringNullTerminate option for null-terminated strings
+
+- New config option stringNullTerminate (default: false)
+- Strips trailing null bytes from strings when enabled
+- Fixes CODESYS C-style string handling
+- Backwards compatible - existing configs unchanged

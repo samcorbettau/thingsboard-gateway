@@ -1,0 +1,13 @@
+fix(modbus): add stringByteOrder config for PLCs with different string encoding
+
+- New config option stringByteOrder defaults to byteOrder (backwards compatible)
+- Explicitly set stringByteOrder=LITTLE for Schneider TM241
+- No behavior change for existing configs
+
+Schneider TM241 analysis:
+- Numeric values use BIG endian
+- String values use LITTLE endian (opposite)
+- Config: byteOrder=BIG, stringByteOrder=LITTLE
+
+Backwards compatible: existing configs work unchanged
+For Schneider: add stringByteOrder=LITTLE to config

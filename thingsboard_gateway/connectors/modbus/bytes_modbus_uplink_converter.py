@@ -134,7 +134,8 @@ class BytesModbusUplinkConverter(ModbusConverter):
             chunk = encoded_data[i:i + config.get('objectsCount', 1)]
             decoded_data = self.decode_data(chunk, config,
                                             self.__config.byte_order,
-                                            self.__config.word_order)
+                                            self.__config.word_order,
+                                            self.__config.string_null_terminate)
 
             if decoded_data is None:
                 self._log.warning("Decoded data is empty, with config: %s", config)
@@ -150,7 +151,8 @@ class BytesModbusUplinkConverter(ModbusConverter):
     def __process_single_address_response_encoded_data(self, config, encoded_data):
         decoded_data = self.decode_data(encoded_data, config,
                                         self.__config.byte_order,
-                                        self.__config.word_order)
+                                        self.__config.word_order,
+                                        self.__config.string_null_terminate)
 
         if decoded_data is None:
             self._log.warning("Decoded data is empty, with config: %s", config)
@@ -201,7 +203,7 @@ class BytesModbusUplinkConverter(ModbusConverter):
 
         return key_name
 
-    def decode_data(self, encoded_data, config, endian_order, word_endian_order):
+    def decode_data(self, encoded_data, config, endian_order, word_endian_order, string_null_terminate=False):
         decoded_data = None
 
         if config['functionCode'] in (1, 2):
@@ -211,11 +213,13 @@ class BytesModbusUplinkConverter(ModbusConverter):
             except TypeError:
                 decoder = self.from_coils(encoded_data, word_endian_order=word_endian_order)
 
-            decoded_data = self.decode_from_registers(decoder, config)
+            decoded_data = self.decode_from_registers(decoder, config,
+                                                      string_null_terminate=string_null_terminate)
         elif config['functionCode'] in (3, 4):
             decoder = BinaryPayloadDecoder.fromRegisters(encoded_data, byteorder=endian_order,
                                                          wordorder=word_endian_order)
-            decoded_data = self.decode_from_registers(decoder, config)
+            decoded_data = self.decode_from_registers(decoder, config,
+                                                      string_null_terminate=string_null_terminate)
 
             if config.get('divider'):
                 decoded_data = float(decoded_data) / float(config['divider'])
@@ -245,7 +249,7 @@ class BytesModbusUplinkConverter(ModbusConverter):
 
         return decoder
 
-    def decode_from_registers(self, decoder, configuration):
+    def decode_from_registers(self, decoder, configuration, string_null_terminate=False):
         objects_count = configuration.get("objectsCount",
                                           configuration.get("registersCount", configuration.get("registerCount", 1)))
         lower_type = configuration["type"].lower()
@@ -306,12 +310,19 @@ class BytesModbusUplinkConverter(ModbusConverter):
         if isinstance(decoded, int):
             result_data = decoded
         elif isinstance(decoded, bytes) and lower_type == "string":
+            # Handle null-terminated strings from PLCs like CODESYS
+            # When stringNullTerminate=True, strip trailing null bytes (0x00)
+            if string_null_terminate:
+                decoded = decoded.rstrip(b'\x00')
             try:
                 result_data = decoded.decode('UTF-8')
             except UnicodeDecodeError as e:
                 self._log.error("Error decoding string from bytes, will be saved as hex: %s", decoded, exc_info=e)
                 result_data = decoded.hex()
         elif isinstance(decoded, bytes) and lower_type == "bytes":
+            # Handle null termination for raw bytes type as well
+            if string_null_terminate:
+                decoded = decoded.rstrip(b'\x00')
             result_data = decoded.hex()
         elif isinstance(decoded, list):
             if configuration.get('bit') is not None:

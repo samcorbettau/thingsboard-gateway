@@ -22,6 +22,13 @@ class BytesUplinkConverterConfig:
         self.device_type = kwargs.get('deviceType', 'default')
         self.byte_order = Endian.BIG if kwargs.get('byteOrder', 'LITTLE').upper() == "BIG" else Endian.LITTLE
         self.word_order = Endian.BIG if kwargs.get('wordOrder', 'LITTLE').upper() == "BIG" else Endian.LITTLE
+        
+        # String null terminator handling
+        # When True, strips null bytes (0x00) from end of strings
+        # Useful for PLCs like CODESYS that use null-terminated C-style strings
+        # Default: False for backwards compatibility
+        self.string_null_terminate = kwargs.get('stringNullTerminate', False)
+        
         self.telemetry = kwargs.get('timeseries', [])
         self.attributes = kwargs.get('attributes', [])
         self.unit_id = kwargs['unitId']
